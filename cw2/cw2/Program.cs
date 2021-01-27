@@ -1,10 +1,12 @@
 ﻿
 using CsvHelper;
+using CsvHelper.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Xml.Serialization;
 
@@ -28,14 +30,17 @@ namespace cw2
             {
                 string args0 = args[0];
                 string args1 = args[1];
-                if(!Uri.IsWellFormedUriString(args0, UriKind.Absolute)){
+                if (!Uri.IsWellFormedUriString(args0, UriKind.Absolute))
+                {
                     throw new ArgumentException("Podana ścieżka: {0} jest niepoprawna", args0);
-                }else if(!Uri.IsWellFormedUriString(args1, UriKind.Absolute))
+                }
+                else if (!Uri.IsWellFormedUriString(args1, UriKind.Absolute))
                 {
                     throw new ArgumentException("Podana ścieżka: {0} jest niepoprawna", args1);
-                }else if (!File.Exists(sourcePath))
+                }
+                else if (!File.Exists(sourcePath))
                 {
-                    throw new FileNotFoundException("Plik {0} nie istnieje",Path.GetFileName(sourcePath));
+                    throw new FileNotFoundException("Plik {0} nie istnieje", Path.GetFileName(sourcePath));
                 }
                 else
                 {
@@ -46,38 +51,41 @@ namespace cw2
 
             }
 
+            var students = new List<Student>();
+            var missingData = new List<String>();
 
-            //2.Loading the data from CSV
-            using (StreamReader sReader = new StreamReader(sourcePath))
-            using (StreamWriter sWriter = new StreamWriter(logPath)) 
-
+            try
             {
-                var studentsHash = new HashSet<Student>();
-                var missingData = new List<String>();
-                string line = null;
-                while ((line = sReader.ReadLine()) != null)
+
+                //2.Loading the data from CSV
+                using (StreamReader sReader = new StreamReader(sourcePath))
+                using (var csv = new CsvReader(sReader, CultureInfo.InvariantCulture))
                 {
-                    string[] data = line.Split(',');
-                  
-
-                    if (data.Length != 9)
+                    var record = csv.GetRecord<Student>();
+                    var hasMissingData = false;
+                    foreach (PropertyInfo pi in record.GetType().GetProperties())
                     {
-                        missingData.Add(String.Join(',', data));
-                        throw new Exception("Wiersz student zawiera błędną liczbę kolumn");
 
-                    }
-                    else {
-                        studentsHash.Add( new Student(data));
-                        //nie usuwa duplikatów, poprawić
+                        if (pi.PropertyType == typeof(string))
+                        {
+                            string value = (string)pi.GetValue(record);
+                            if (string.IsNullOrEmpty(value))
+                            {
+                                hasMissingData = true;
+
+                            }
+                        }
                     }
 
-                  
+                    if (hasMissingData) missingData.Add(record.ToString());
+                    else students.Add(record);
+
 
                 }
+
                 File.WriteAllLines(logPath, missingData);
 
-                var students = new List<Student>(studentsHash);
-                //3.Save CSV into XML
+
                 FileStream writer = new FileStream(destinationPath, FileMode.Create);
                 XmlSerializer serializer = new XmlSerializer(typeof(List<Student>),
                     new XmlRootAttribute("uczelnia"));
@@ -89,11 +97,19 @@ namespace cw2
                 string jsonString = JsonSerializer.Serialize(students);
                 File.WriteAllText("data.json", jsonString);
 
+
+
+            }
+            catch (Exception e)
+            {
+                File.WriteAllText(logPath, e.Message);
             }
 
+            Console.WriteLine(students.Count());
 
+            Console.WriteLine("Missing data of : " + missingData.Count());
         }
 
-       
+
     }
 }
